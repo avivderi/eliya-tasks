@@ -252,6 +252,7 @@ install.
 ### שלב 0: איפוס המערכת וניקוי חשבונות קודמים
 לפני הכל, נוודא שהמערכת ריקה מפתקים קודמים ושהדפדפן לא זוכר חיבורים ישנים:
 ```bash
+cd keep_migration/
 rm -rf browser_profiles/
 rm -rf ~/keep_migration_chrome_profile
 rm -rf data/keep_debug/
