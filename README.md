@@ -240,3 +240,25 @@ install.
   - For extra safety, `data/notes_backup.json` is a plain, human-readable
   JSON backup you keep permanently — even if Step 2 ever needs
   adjustment, your extracted notes are never at risk.
+
+
+
+
+
+
+# 1. מחיקת פרופילי הדפדפן (מנתק גם את Google וגם את Xiaomi)
+rm -rf browser_profiles/
+rm -rf ~/keep_migration_chrome_profile
+
+# 2. מחיקת תיקיות הדיבאג וצילומי המסך
+rm -rf data/keep_debug/
+
+# 3. מחיקת כל קבצי הפתקים שחולצו
+rm -f data/notes_backup.json
+
+# 4. מחיקת כל קבצי מעקב ההתקדמות ורשימת הכישלונות
+rm -f data/extract_progress.json
+rm -f data/import_progress.json
+rm -f data/failed_notes.json
+rm -f data/failed_imports.json
+rm -f data/extract_debug.html

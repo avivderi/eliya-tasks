@@ -174,7 +174,9 @@ def main():
         log(f"Launching browser with saved profile: {config.XIAOMI_PROFILE_DIR}")
         context = p.chromium.launch_persistent_context(
             config.XIAOMI_PROFILE_DIR,
+            channel="chrome",
             headless=False,
+            args=["--disable-blink-features=AutomationControlled"],
             viewport={"width": 1400, "height": 900},
         )
         page = context.new_page()
