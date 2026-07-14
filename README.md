@@ -13,8 +13,13 @@ steps: **Backup** (Step 1) and **Injection** (Step 2). No copy-pasting.
   opens a real, visible browser window and **you log in by hand** (with
   2FA/passkeys if you use them). This is exactly why Google won't block it
   — it only blocks *automated* logins, not a human typing their own
-  password. After you log in once, the session is saved to a local folder
-  (`browser_profiles/`) so you won't have to log in again on reruns.
+  password. For Xiaomi, the session is saved to a local folder
+  (`browser_profiles/`) so you won't have to log in again on reruns. For
+  Google Keep specifically, the script drives your **real, already-installed
+  Google Chrome** (not Playwright's own bundled browser) using a **copy of
+  your real Chrome profile** -- see the "One-time Chrome setup for Google
+  Keep" section below. This is required because Google's sign-in page
+  actively blocks Playwright's own bundled browser build.
 - **Neither i.mi.com nor Google Keep has a public API for personal
   accounts**, so this reads/writes the same web pages you'd use manually —
   it just does it 240 times reliably instead of you doing it by hand.
@@ -118,6 +123,51 @@ that instead of system Python. Follow the block for your OS.
 
 ---
 
+## One-time Chrome setup for Google Keep (required before Step 2)
+
+Google's sign-in page blocks Playwright's own bundled browser build, even
+with a fully manual, human login. The fix: point the script at your
+**real, already-installed Google Chrome**, using a **copy** of your real
+Chrome profile (so it inherits your browser's trusted certificates and
+settings).
+
+1. Make sure Google Chrome (not just Chromium) is actually installed:
+   ```bash
+   google-chrome --version      # Ubuntu
+   ```
+   On macOS, just confirm you have Chrome in Applications. If not, install
+   it from https://www.google.com/chrome/ first.
+
+2. Close **all** Chrome windows completely (not just minimize):
+   ```bash
+   pkill -f "google-chrome"     # Ubuntu
+   # macOS: Cmd+Q on Chrome, or: pkill -f "Google Chrome"
+   ```
+
+3. Copy your real Chrome profile into a separate working folder (skips
+   heavy cache folders to keep it fast):
+   ```bash
+   mkdir -p ~/keep_migration_chrome_profile
+   rsync -a --exclude='Cache' --exclude='Code Cache' --exclude='GPUCache' --exclude='ShaderCache' --exclude='*.lock' --exclude='SingletonLock' --exclude='SingletonCookie' --exclude='SingletonSocket' ~/.config/google-chrome/ ~/keep_migration_chrome_profile/
+   ```
+   (macOS path is different: `~/Library/Application Support/Google/Chrome/`
+   instead of `~/.config/google-chrome/`.)
+
+4. Don't browse with your regular Chrome while `keep_import.py` is running
+   (it uses this copied profile, not your live one, so there's no
+   conflict with your everyday browsing -- but avoid running both at once
+   to keep things simple).
+
+> ⚠️ **Security note:** `~/keep_migration_chrome_profile` contains a copy of
+> **every saved password and cookie in your real Chrome**, not just
+> Google's. It lives outside this project folder on purpose. **Never** move
+> it into the project folder or commit it to git/GitHub -- it is
+> effectively as sensitive as your master password list. The `.gitignore`
+> in this repo also blocks `browser_profiles/` (the Xiaomi session folder)
+> for the same reason.
+
+---
+
 ## Usage
 
 ### Step 1 — Back up notes from Xiaomi Cloud
@@ -151,14 +201,18 @@ whole batch.
 
 ### Step 2 — Import notes into Google Keep
 
+Make sure you've completed the "One-time Chrome setup for Google Keep"
+section above first. Then:
 ```bash
 python keep_import.py
 ```
-A browser opens to Google Keep. Log in manually (2FA is fine — you're
-doing it yourself), press Enter in the terminal, and the script creates
-one Keep note per entry in `notes_backup.json`, with the same crash-safe
-resume behavior as Step 1. If Google's page structure ever changes and the
-default selectors stop working, run `python keep_import.py --inspect`
+A window of your **real Chrome** opens to Google Keep, already signed in
+(since it's using a copy of your logged-in profile) or prompting a normal
+manual login if not. Press Enter in the terminal once you see your notes,
+and the script creates one Keep note per entry in `notes_backup.json`,
+with the same crash-safe resume behavior as Step 1. Failures are logged to
+`data/failed_imports.json`. If Google's page structure ever changes and
+the default selectors stop working, run `python keep_import.py --inspect`
 once to recalibrate, the same way as Step 1.
 
 ### Optional: one-click GUI
