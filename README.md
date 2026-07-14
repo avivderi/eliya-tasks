@@ -245,20 +245,46 @@ install.
 
 
 
+## המדריך המקוצר: איך לעבוד עם זה בתכלס (שלב אחרי שלב)
 
-# 1. מחיקת פרופילי הדפדפן (מנתק גם את Google וגם את Xiaomi)
+כאשר אתה מתחיל לעבוד על חשבון חדש (למשל של גיסתך), עקוב אחרי השלבים הבאים בדיוק לפי הסדר:
+
+### שלב 0: איפוס המערכת וניקוי חשבונות קודמים
+לפני הכל, נוודא שהמערכת ריקה מפתקים קודמים ושהדפדפן לא זוכר חיבורים ישנים:
+```bash
 rm -rf browser_profiles/
 rm -rf ~/keep_migration_chrome_profile
-
-# 2. מחיקת תיקיות הדיבאג וצילומי המסך
 rm -rf data/keep_debug/
+rm -f data/notes_backup.json data/extract_progress.json data/import_progress.json data/failed_*.json data/extract_debug.html
+```
+*(אין צורך למחוק את קבצי הסלקטורים `keep_selectors.json` או `xiaomi_selectors.json` – הם תקינים ויעבדו לכל חשבון).*
 
-# 3. מחיקת כל קבצי הפתקים שחולצו
-rm -f data/notes_backup.json
+### שלב 1: ייצוא הפתקים מ-Xiaomi
+הרצת סקריפט הייצוא:
+```bash
+python xiaomi_export.py
+```
+1. ייפתח חלון כרום - **התחבר לחשבון השיואמי (Xiaomi Account)**.
+2. אם קופצת חלונית Tips או עמוד אחר, דלג עליהם עד שתראה את רשימת הפתקים שלך מול העיניים.
+3. ברגע שהרשימה פתוחה במסך, חזור לטרמינל ולחץ **Enter**.
+4. הסקריפט יתחיל לרוץ, יגלול למטה, וישמור את כל הפתקים לקובץ `data/notes_backup.json`. (אם הוא נעצר או נכשל, פשוט תריץ את הפקודה שוב והוא ימשיך מאותה נקודה).
 
-# 4. מחיקת כל קבצי מעקב ההתקדמות ורשימת הכישלונות
-rm -f data/extract_progress.json
-rm -f data/import_progress.json
-rm -f data/failed_notes.json
-rm -f data/failed_imports.json
-rm -f data/extract_debug.html
+### שלב 2: הכנת הדפדפן עבור Google Keep
+כדי לעקוף את החסימות של גוגל, נשכפל פעם אחת את הפרופיל של הכרום האמיתי שלך אל הפרויקט:
+1. סגור את כל חלונות הכרום הפתוחים במחשב.
+2. הרץ את הפקודה הבאה ליצירת העותק:
+```bash
+mkdir -p ~/keep_migration_chrome_profile
+rsync -a --exclude='Cache' --exclude='Code Cache' --exclude='GPUCache' --exclude='ShaderCache' --exclude='*.lock' ~/.config/google-chrome/ ~/keep_migration_chrome_profile/
+```
+
+### שלב 3: ייבוא הפתקים ל-Google Keep
+הרצת סקריפט הייבוא:
+```bash
+python keep_import.py
+```
+1. הדפדפן ייפתח מולך. במידת הצורך - **התחבר לחשבון הגוגל שאליו תרצה להעביר את הפתקים**.
+2. ברגע שאתה רואה את הממשק של Keep (כולל התיבה של 'Take a note…' או 'כתיבת פתק…'), חזור לטרמינל ולחץ **Enter**.
+3. הסקריפט ירוץ פתק-פתק ויזין אותם. במקרה שהסקריפט קורס (בגלל אינטרנט או גליץ'), פשוט הרץ את הפקודה שוב והוא ידלג על מה שכבר עבר!
+
+**זהו! בהצלחה!**
