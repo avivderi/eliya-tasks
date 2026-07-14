@@ -117,25 +117,75 @@ def run_calibration(page):
     log("You can now run: python xiaomi_export.py")
 
 
-def scroll_to_load_all(page, list_item_selector, max_stable_rounds=4):
+def scroll_to_load_all(page, list_item_selector, max_stable_rounds=10):
     """
     i.mi.com's note list is virtualized/lazy-loaded like most modern SPAs:
     scrolling down loads more notes. Keep scrolling until the count of
     matched list items stops growing for a few rounds in a row.
     """
     log("Scrolling the note list to load all notes (this can take a while for 240 notes)...")
+    
+    # Try to hover over the first note to focus the mouse on the scrollable area
+    try:
+        page.hover(list_item_selector)
+        log("Hovered over the note list to focus scroll.")
+    except Exception as e:
+        log(f"Warning: Could not hover over list item: {e}")
+
     stable_rounds = 0
     last_count = -1
     while stable_rounds < max_stable_rounds:
         count = page.eval_on_selector_all(list_item_selector, "els => els.length")
         if count == last_count:
             stable_rounds += 1
+            if stable_rounds >= 3:
+                log(f"  ...{count} notes loaded. (Hint: if it seems stuck at {count}, please scroll the notes list manually in the browser window to trigger the next load)")
         else:
             stable_rounds = 0
             log(f"  ...{count} notes loaded so far")
         last_count = count
-        page.mouse.wheel(0, 2000)
-        time.sleep(config.MEDIUM_WAIT)
+        
+        # Scroll the last note element into view (Playwright native scrolling)
+        try:
+            items = page.query_selector_all(list_item_selector)
+            if items:
+                items[-1].scroll_into_view_if_needed()
+                items[-1].hover()
+        except Exception:
+            pass
+        
+        # Scroll using mouse wheel in multiple smaller steps to simulate natural scrolling
+        try:
+            for _ in range(5):
+                page.mouse.wheel(0, 600)
+                time.sleep(0.1)
+        except Exception:
+            pass
+        
+        # Scroll EVERY scrollable ancestor of the note list items directly to the bottom
+        try:
+            page.evaluate(f"""() => {{
+                const el = document.querySelector("{list_item_selector}");
+                if (el) {{
+                    let parent = el.parentElement;
+                    while (parent) {{
+                        const style = window.getComputedStyle(parent);
+                        const overflowY = style.overflowY;
+                        if (parent.scrollHeight > parent.clientHeight && 
+                            (overflowY === 'auto' || overflowY === 'scroll' || parent.style.overflowY === 'auto' || parent.style.overflowY === 'scroll')) {{
+                            parent.scrollTop = parent.scrollHeight;
+                        }}
+                        parent = parent.parentElement;
+                    }}
+                }}
+                window.scrollTo(0, document.body.scrollHeight);
+            }}""")
+        except Exception as e:
+            log(f"  [Scroll warning] JS scroll failed: {e}")
+
+        # Wait longer (config.LONG_WAIT is 3.0s) to give the Xiaomi Cloud API time to load notes
+        time.sleep(config.LONG_WAIT)
+        
     log(f"Finished scrolling. Total notes detected: {last_count}")
     return last_count
 
@@ -193,49 +243,116 @@ def main():
             return
 
         selectors = load_selectors()
-        scroll_to_load_all(page, selectors["list_item"])
-
+        
+        # Load previously extracted notes
         results = load_json(config.NOTES_BACKUP_FILE, [])
-        progress = load_json(config.EXTRACT_PROGRESS_FILE, {"done_indices": []})
-        failed = load_json(config.FAILED_NOTES_FILE, [])
-        done = set(progress["done_indices"])
+        
+        # Build set of already extracted note signatures (first 100 chars of Title + Content)
+        seen_sigs = set()
+        for note in results:
+            sig = (note.get("title", "") + "\n" + note.get("content", "")).strip()[:100]
+            seen_sigs.add(sig)
+            
+        seen_item_texts = set()
+        
+        log(f"Loaded {len(results)} previously extracted notes. Starting progressive extraction...")
+        log("If the script stops seeing new notes, feel free to scroll the notes list manually in the browser.")
 
-        total = page.eval_on_selector_all(selectors["list_item"], "els => els.length")
-        log(f"Starting extraction of {total} notes ({len(done)} already done from a previous run).")
-
-        for i in range(total):
-            if i in done:
+        no_new_rounds = 0
+        
+        while no_new_rounds < 8:
+            # 1. Get all visible note items currently in the DOM
+            try:
+                items = page.query_selector_all(selectors["list_item"])
+            except Exception as e:
+                log(f"Error querying list items: {e}")
+                time.sleep(1)
                 continue
-            success = False
-            last_error = None
-            for attempt in range(1, config.MAX_RETRIES_PER_NOTE + 1):
+                
+            if not items:
+                log("No note items found in the DOM. Waiting...")
+                time.sleep(2)
+                no_new_rounds += 1
+                continue
+                
+            new_extracted_in_this_loop = False
+            
+            for item in items:
                 try:
-                    note = extract_one_note(page, selectors, i)
+                    # Get unique signature of the list item (contains preview text, title, date)
+                    item_text = item.inner_text().strip()
+                except Exception:
+                    continue
+                    
+                if item_text in seen_item_texts:
+                    continue
+                    
+                # Click the item to load its detail pane
+                try:
+                    item.click()
+                    # Use a short sleep to allow the note content to load
+                    page.wait_for_timeout(500)
+                except Exception as e:
+                    # If it's scrolled out of view, we don't log an error, just try again next round
+                    continue
+                    
+                # Extract the note details
+                try:
+                    title_el = page.query_selector(selectors["title"])
+                    content_el = page.query_selector(selectors["content"])
+                    date_el = page.query_selector(selectors["date"]) if selectors.get("date") else None
+                    
+                    title = title_el.inner_text().strip() if title_el else ""
+                    content = content_el.inner_text().strip() if content_el else ""
+                    date = date_el.inner_text().strip() if date_el else ""
+                    
+                    # Normalize empty notes
+                    if not title and not content:
+                        continue
+                        
+                    full_sig = (title + "\n" + content).strip()[:100]
+                    
+                    if full_sig in seen_sigs:
+                        # Already extracted in a previous run, just mark the list item text as seen
+                        seen_item_texts.add(item_text)
+                        continue
+                        
+                    # It's a new note!
+                    note = {"title": title, "content": content, "date": date}
                     results.append(note)
-                    done.add(i)
+                    seen_sigs.add(full_sig)
+                    seen_item_texts.add(item_text)
+                    new_extracted_in_this_loop = True
+                    
                     save_json(config.NOTES_BACKUP_FILE, results)
-                    progress["done_indices"] = sorted(done)
-                    save_json(config.EXTRACT_PROGRESS_FILE, progress)
-                    log(f"[{len(done)}/{total}] Extracted: "
-                        f"'{note['title'][:40] or note['content'][:40]}'")
-                    success = True
-                    break
-                except (PWTimeout, IndexError, ValueError) as e:
-                    last_error = str(e)
-                    log(f"  Attempt {attempt}/{config.MAX_RETRIES_PER_NOTE} "
-                        f"failed for note {i}: {last_error}")
-                    time.sleep(config.LONG_WAIT)
-            if not success:
-                failed.append({"index": i, "error": last_error})
-                save_json(config.FAILED_NOTES_FILE, failed)
-                log(f"  Giving up on note {i} after {config.MAX_RETRIES_PER_NOTE} attempts. "
-                    f"Logged to {config.FAILED_NOTES_FILE}.")
-            time.sleep(config.SHORT_WAIT)
+                    log(f"[{len(results)}] Extracted: '{title[:35] or content[:35]}...'")
+                except Exception as e:
+                    log(f"  Warning: Error extracting note details: {e}")
+                    
+            # 2. Scroll down gently to bring more notes into view
+            try:
+                # Smoothly scroll the last note in the list into view to trigger lazy loading
+                if items:
+                    items[-1].scroll_into_view_if_needed()
+                
+                # Perform a gentle scroll wheel event
+                page.mouse.wheel(0, 500)
+            except Exception:
+                pass
+                
+            if new_extracted_in_this_loop:
+                no_new_rounds = 0
+            else:
+                no_new_rounds += 1
+                if no_new_rounds >= 3:
+                    log(f"  No new notes detected in the last {no_new_rounds} rounds. "
+                        f"If you have more than {len(results)} notes, please scroll the notes list manually in the browser window.")
+            
+            # Wait a bit for the UI/API to load new notes
+            time.sleep(2.0)
 
         context.close()
         log(f"Done. {len(results)} notes saved to {config.NOTES_BACKUP_FILE}.")
-        if failed:
-            log(f"{len(failed)} note(s) failed and need manual review: {config.FAILED_NOTES_FILE}")
 
 
 if __name__ == "__main__":

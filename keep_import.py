@@ -184,7 +184,12 @@ def create_one_note(page, selectors, index, title, content):
         actual = "\n".join(page.locator("[contenteditable='true']:visible").all_inner_texts())
 
     expected_snippet = content.strip()[:30]
-    if expected_snippet and expected_snippet not in actual:
+    
+    # Normalize whitespace/newlines before comparing to handle editor-specific paragraph rendering
+    actual_norm = "".join(actual.split())
+    expected_norm = "".join(expected_snippet.split())
+
+    if expected_norm and expected_norm not in actual_norm:
         dump_debug(page, index, "content_mismatch")
         raise RuntimeError(
             f"Content did not land correctly. Expected to find "
